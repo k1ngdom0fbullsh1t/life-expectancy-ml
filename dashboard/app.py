@@ -1,6 +1,6 @@
 """
 Dashboard interactivo — Life Expectancy ML
-Streamlit app: prediccion por pais, mapa mundial, comparativa regional y metricas del modelo.
+Predicción por país con explicación SHAP, mapa mundial, comparativa regional y métricas del modelo.
 """
 
 import streamlit as st
@@ -12,8 +12,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 
-# ── Configuracion ────────────────────────────────────────────────────────────
-
 st.set_page_config(
     page_title="Life Expectancy ML",
     page_icon="🌍",
@@ -23,29 +21,91 @@ st.set_page_config(
 
 BASE = Path(__file__).parent.parent
 DATA_PATH  = BASE / "data" / "processed" / "dataset_final.csv"
-MODEL_PATH = BASE / "models" / "best_model.pkl"
+MODEL_PATH = BASE / "models" / "dashboard_model.pkl"
+REPO_URL   = "https://github.com/k1ngdom0fbullsh1t/life-expectancy-ml"
 
-# Metricas del modelo (split temporal train<=2017 / test>=2018)
-MODEL_METRICS = {"R²": 0.9865, "RMSE": 0.838, "MAE": 0.609}
-
-REGION_COLORS = {
-    "Africa":   "#e07b54",
-    "Americas": "#5b8ff9",
-    "Asia":     "#5ad8a6",
-    "Europe":   "#f6bd16",
-    "Oceania":  "#945fb9",
-    "Otro":     "#6e6e6e",
+REGION_ES = {
+    "Africa":   "África",
+    "Americas": "América",
+    "Asia":     "Asia",
+    "Europe":   "Europa",
+    "Oceania":  "Oceanía",
 }
 
-# ── Carga de datos y modelo ───────────────────────────────────────────────────
+OCDE = {
+    "AUS", "AUT", "BEL", "CAN", "CHL", "COL", "CRI", "CZE", "DNK", "EST", "FIN", "FRA", "DEU",
+    "GRC", "HUN", "ISL", "IRL", "ISR", "ITA", "JPN", "KOR", "LVA", "LTU", "LUX", "MEX", "NLD",
+    "NZL", "NOR", "POL", "PRT", "SVK", "SVN", "ESP", "SWE", "CHE", "TUR", "GBR", "USA",
+}
+
+FEATURE_LABELS = {
+    "anio":                     "Año",
+    "mortalidad_infantil":      "Mortalidad infantil",
+    "mortalidad_adulta":        "Mortalidad adulta",
+    "prevalencia_vih":          "Personas con VIH (estimado)",
+    "vacunacion_dtp":           "Vacunación DTP",
+    "vacunacion_hepatitis_b":   "Vacunación hepatitis B",
+    "medicos_por_10000":        "Médicos por 10.000 hab.",
+    "prevalencia_anemia_ninos": "Anemia infantil",
+    "log_pib_per_capita":       "PIB per cápita (log)",
+    "gasto_salud_pct_pib":      "Gasto en salud (% PIB)",
+    "gasto_educacion_pct_pib":  "Gasto en educación (% PIB)",
+    "acceso_agua_potable":      "Acceso a agua potable",
+    "acceso_saneamiento":       "Acceso a saneamiento",
+    "acceso_electricidad":      "Acceso a electricidad",
+    "tasa_desempleo":           "Tasa de desempleo",
+    "urbanizacion_pct":         "Urbanización",
+    "usuarios_internet_pct":    "Usuarios de internet",
+}
+
+INDICADORES = {
+    "esperanza_vida":      ("Esperanza de vida (años)", "{:.1f}"),
+    "mortalidad_infantil": ("Mortalidad infantil (por 1.000)", "{:.1f}"),
+    "mortalidad_adulta":   ("Mortalidad adulta (por 1.000)", "{:.1f}"),
+    "pib_per_capita":      ("PIB per cápita (USD)", "{:,.0f}"),
+    "acceso_electricidad": ("Acceso a electricidad (%)", "{:.1f}"),
+    "acceso_saneamiento":  ("Acceso a saneamiento (%)", "{:.1f}"),
+    "acceso_agua_potable": ("Acceso a agua potable (%)", "{:.1f}"),
+    "gasto_salud_pct_pib": ("Gasto en salud (% PIB)", "{:.1f}"),
+    "prevalencia_vih":     ("Personas con VIH (estimado)", "{:,.0f}"),
+}
+
+AZUL, ROJO, VERDE, AMARILLO = "#5b8ff9", "#e07b54", "#5ad8a6", "#f6bd16"
+GRID = "rgba(128,128,128,0.2)"
+COLORES_REGION = {"África": ROJO, "América": AZUL, "Asia": VERDE, "Europa": AMARILLO, "Oceanía": "#945fb9"}
+LEYENDA_ABAJO =dict(orientation="h", yanchor="top", y=-0.18, xanchor="left", x=0, title_text="")
+
+
+def etiqueta(feature: str) -> str:
+    if feature.startswith("region_"):
+        region = feature.removeprefix("region_")
+        return f"Región: {REGION_ES.get(region, region)}"
+    return FEATURE_LABELS.get(feature, feature)
+
+
+def layout_base(fig: go.Figure, height: int) -> go.Figure:
+    fig.update_layout(
+        height=height,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=10, r=30, t=50, b=40),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor=GRID)
+    fig.update_yaxes(showgrid=True, gridcolor=GRID)
+    return fig
+
+
+# ── Carga ─────────────────────────────────────────────────────────────────────
 
 @st.cache_data
 def load_data() -> pd.DataFrame:
-    return pd.read_csv(DATA_PATH)
+    df = pd.read_csv(DATA_PATH)
+    df["region_es"] = df["region"].map(REGION_ES)
+    return df
 
 
 @st.cache_resource
-def load_model() -> dict:
+def load_artifact() -> dict:
     return joblib.load(MODEL_PATH)
 
 
@@ -54,162 +114,159 @@ def load_explainer(_model) -> shap.TreeExplainer:
     return shap.TreeExplainer(_model)
 
 
-# ── Transformacion de features ────────────────────────────────────────────────
-
-def preparar_fila(df_fila: pd.DataFrame, feature_names: list) -> pd.DataFrame:
-    df = df_fila.copy()
-    df["log_pib_per_capita"] = np.log1p(df["pib_per_capita"])
-    df = df.drop(columns=["pib_per_capita"], errors="ignore")
-
-    region_dummies = pd.get_dummies(df["region"], prefix="region")
-    df = pd.concat([df, region_dummies], axis=1)
-
-    drop_cols = ["iso3", "pais", "region", "esperanza_vida"]
-    df = df.drop(columns=[c for c in drop_cols if c in df.columns])
-
-    for col in feature_names:
-        if col not in df.columns:
-            df[col] = 0
-    return df[feature_names]
+def preparar_X(df: pd.DataFrame, feature_names: list) -> pd.DataFrame:
+    X = df.copy()
+    X["log_pib_per_capita"] = np.log1p(X["pib_per_capita"])
+    X = pd.concat([X, pd.get_dummies(X["region"], prefix="region")], axis=1)
+    return X.reindex(columns=feature_names, fill_value=0).astype(float)
 
 
-# ── Graficos auxiliares ───────────────────────────────────────────────────────
-
-def shap_waterfall_plotly(shap_vals, feature_names, base_value, prediction, top_n=10):
-    """Genera un grafico waterfall de SHAP con Plotly."""
-    pairs = sorted(zip(shap_vals, feature_names), key=lambda x: abs(x[0]), reverse=True)
-    vals, names = zip(*pairs[:top_n])
-
-    # Acumulacion para el waterfall
-    running = base_value
-    x_starts, x_widths, colors, labels = [], [], [], []
-    for v, n in zip(vals, names):
-        x_starts.append(running)
-        x_widths.append(v)
-        colors.append("#e07b54" if v < 0 else "#5b8ff9")
-        labels.append(f"{n}<br>{v:+.3f}")
-        running += v
-
-    fig = go.Figure()
-
-    # Barras SHAP
-    for i, (start, width, color, label) in enumerate(zip(x_starts, x_widths, colors, labels)):
-        fig.add_trace(go.Bar(
-            x=[width],
-            y=[names[i]],
-            base=[start],
-            orientation="h",
-            marker_color=color,
-            text=f"{vals[i]:+.3f}",
-            textposition="outside",
-            hovertemplate=f"<b>{names[i]}</b><br>Impacto SHAP: {vals[i]:+.3f}<extra></extra>",
-            showlegend=False,
-        ))
-
-    # Linea de valor base
-    fig.add_vline(x=base_value, line_dash="dot", line_color="gray",
-                  annotation_text=f"Base: {base_value:.1f}", annotation_position="top")
-    # Linea de prediccion
-    fig.add_vline(x=prediction, line_dash="dash", line_color="#5ad8a6",
-                  annotation_text=f"Pred: {prediction:.1f}", annotation_position="top right")
-
-    fig.update_layout(
-        title="Factores que influyen en la prediccion (SHAP)",
-        xaxis_title="Esperanza de vida (anos)",
-        yaxis_title="",
-        height=420,
-        margin=dict(l=20, r=60, t=50, b=40),
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-    )
-    fig.update_xaxes(showgrid=True, gridcolor="rgba(128,128,128,0.2)")
-    fig.update_yaxes(autorange="reversed")
-    return fig
+@st.cache_data
+def importancia_shap(_explainer, X: pd.DataFrame) -> pd.Series:
+    valores = _explainer(X).values
+    return pd.Series(np.abs(valores).mean(axis=0), index=X.columns)
 
 
-# ── App principal ─────────────────────────────────────────────────────────────
+def grupos_comparacion(df: pd.DataFrame) -> dict:
+    grupos = {
+        "LATAM": (df["region"] == "Americas") & ~df["iso3"].isin(["USA", "CAN"]),
+        "OCDE":  df["iso3"].isin(OCDE),
+    }
+    for region, nombre in REGION_ES.items():
+        grupos[nombre] = df["region"] == region
+    return grupos
+
+
+# ── Gráficos ──────────────────────────────────────────────────────────────────
+
+def shap_waterfall(shap_vals, feature_names, base_value, prediction, top_n=8) -> go.Figure:
+    orden = np.argsort(-np.abs(shap_vals))
+    top, resto = orden[:top_n], orden[top_n:]
+
+    nombres = [etiqueta(feature_names[i]) for i in top]
+    valores = [float(shap_vals[i]) for i in top]
+    if len(resto):
+        nombres.append(f"Otras {len(resto)} variables")
+        valores.append(float(shap_vals[resto].sum()))
+
+    acumulado = base_value + np.cumsum(valores)
+    lo = min(base_value, acumulado.min())
+    hi = max(base_value, acumulado.max())
+    pad = 0.25 * (hi - lo) + 0.5
+
+    fig = go.Figure(go.Waterfall(
+        orientation="h",
+        measure=["absolute"] + ["relative"] * len(valores) + ["total"],
+        y=["Promedio del modelo"] + nombres + ["Predicción"],
+        x=[base_value] + valores + [0],
+        text=[f"{base_value:.2f}"] + [f"{v:+.2f}" for v in valores] + [f"{prediction:.2f}"],
+        textposition="outside",
+        increasing=dict(marker=dict(color=AZUL)),
+        decreasing=dict(marker=dict(color=ROJO)),
+        totals=dict(marker=dict(color=VERDE)),
+        connector=dict(line=dict(color="rgba(128,128,128,0.4)", dash="dot")),
+        hovertemplate="%{y}: %{text}<extra></extra>",
+    ))
+    fig.update_layout(title="¿Por qué el modelo predice este valor? (SHAP)",
+                      xaxis_title="Esperanza de vida (años)", showlegend=False)
+    fig.update_xaxes(range=[lo - pad, hi + pad])
+    fig.update_yaxes(autorange="reversed", showgrid=False)
+    return layout_base(fig, 440)
+
+
+# ── App ───────────────────────────────────────────────────────────────────────
 
 def main():
     df = load_data()
-    artifact = load_model()
+    artifact = load_artifact()
     model = artifact["model"]
     feature_names = artifact["feature_names"]
+    train_max_year = artifact["train_max_year"]
+    metricas = artifact["metrics"]
     explainer = load_explainer(model)
+    grupos = grupos_comparacion(df)
 
     paises = sorted(df["pais"].unique())
     anios = sorted(df["anio"].unique())
+    anio_min, anio_max = anios[0], anios[-1]
 
-    # ── Sidebar ──────────────────────────────────────────────────────────────
     with st.sidebar:
         st.title("🌍 Life Expectancy ML")
-        st.markdown("Modelo predictivo de esperanza de vida · XGBoost · R²=0.9865")
+        st.markdown(
+            f"Modelo predictivo de esperanza de vida · XGBoost · "
+            f"R² {metricas['r2']:.4f} en {train_max_year + 1}–{anio_max} (fuera de muestra)"
+        )
         st.divider()
 
-        st.subheader("Seleccion")
-        pais_sel = st.selectbox("Pais", paises, index=paises.index("Chile"))
-        anio_sel = st.select_slider("Ano", options=anios, value=2021)
+        st.subheader("Selección")
+        pais_sel = st.selectbox("País", paises, index=paises.index("Chile"))
+        anio_sel = st.select_slider("Año", options=anios, value=anio_max)
 
         st.divider()
-        st.caption("Datos: OMS (WHO) y Banco Mundial · Periodo 2000-2021 · 185 paises")
+        st.caption(
+            f"Datos: OMS (WHO) y Banco Mundial · {anio_min}–{anio_max} · "
+            f"{df['pais'].nunique()} países"
+        )
+        st.caption(f"[Código en GitHub]({REPO_URL})")
 
-    # ── Tabs ─────────────────────────────────────────────────────────────────
     tab1, tab2, tab3, tab4 = st.tabs(
-        ["🔍 Prediccion", "🌍 Mapa Mundial", "📊 Comparativa", "🤖 Metricas del Modelo"]
+        ["🔍 Predicción", "🌍 Mapa mundial", "📊 Comparativa", "🤖 Métricas del modelo"]
     )
 
-    # ── TAB 1: Prediccion ────────────────────────────────────────────────────
+    # ── Predicción ───────────────────────────────────────────────────────────
     with tab1:
         fila = df[(df["pais"] == pais_sel) & (df["anio"] == anio_sel)]
 
         if fila.empty:
             st.warning(f"No hay datos para {pais_sel} en {anio_sel}.")
         else:
-            row = fila.iloc[[0]]
-            real = row["esperanza_vida"].values[0]
-            X_row = preparar_fila(row, feature_names)
+            real = float(fila["esperanza_vida"].iloc[0])
+            X_row = preparar_X(fila, feature_names)
             pred = float(model.predict(X_row)[0])
             error = abs(pred - real)
 
             st.subheader(f"{pais_sel} · {anio_sel}")
+            if anio_sel > train_max_year:
+                st.success(
+                    f"Predicción fuera de muestra: el modelo se entrenó con datos hasta "
+                    f"{train_max_year} y nunca vio este año."
+                )
+            else:
+                st.info(
+                    f"Este año fue parte del entrenamiento ({anio_min}–{train_max_year}), así que "
+                    f"el error es optimista. Elige {train_max_year + 1}–{anio_max} para ver "
+                    f"predicciones fuera de muestra."
+                )
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Prediccion del modelo", f"{pred:.2f} anos")
-            col2.metric("Valor real", f"{real:.2f} anos")
-            col3.metric("Error absoluto", f"{error:.2f} anos",
-                        delta=f"{'Sobreestima' if pred > real else 'Subestima'} por {error:.2f}",
-                        delta_color="inverse")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Predicción del modelo", f"{pred:.2f} años")
+            c2.metric("Valor real", f"{real:.2f} años")
+            c3.metric("Error absoluto", f"{error:.2f} años")
+            st.caption(
+                f"El modelo {'sobreestima' if pred > real else 'subestima'} "
+                f"la esperanza de vida en {error:.2f} años."
+            )
 
             st.divider()
 
-            # SHAP waterfall
-            shap_values = explainer(X_row)
-            sv = shap_values.values[0]
-            base = float(shap_values.base_values[0])
-            fig_shap = shap_waterfall_plotly(sv, feature_names, base, pred)
+            sv = explainer(X_row)
+            fig_shap = shap_waterfall(sv.values[0], feature_names, float(sv.base_values[0]), pred)
             st.plotly_chart(fig_shap, use_container_width=True)
+            st.caption(
+                "Cada barra muestra cuántos años suma (azul) o resta (rojo) cada variable "
+                "a partir del promedio del modelo."
+            )
 
-            # Indicadores clave del pais
-            with st.expander("Ver indicadores del pais"):
-                indicadores = {
-                    "Mortalidad infantil":     row["mortalidad_infantil"].values[0],
-                    "Mortalidad adulta":        row["mortalidad_adulta"].values[0],
-                    "PIB per capita (USD)":     row["pib_per_capita"].values[0],
-                    "Acceso electricidad (%)":  row["acceso_electricidad"].values[0],
-                    "Acceso saneamiento (%)":   row["acceso_saneamiento"].values[0],
-                    "Acceso agua potable (%)":  row["acceso_agua_potable"].values[0],
-                    "Gasto en salud (% PIB)":   row["gasto_salud_pct_pib"].values[0],
-                    "Prevalencia VIH":          row["prevalencia_vih"].values[0],
-                }
-                st.dataframe(
-                    pd.DataFrame(list(indicadores.items()), columns=["Indicador", "Valor"])
-                    .set_index("Indicador")
-                    .style.format({"Valor": "{:.2f}"}),
-                    use_container_width=True,
-                )
+            with st.expander("Ver indicadores del país"):
+                tabla = pd.DataFrame(
+                    [(nombre, fmt.format(fila[col].iloc[0])) for col, (nombre, fmt) in INDICADORES.items()],
+                    columns=["Indicador", "Valor"],
+                ).set_index("Indicador")
+                st.dataframe(tabla, use_container_width=True)
 
-    # ── TAB 2: Mapa Mundial ──────────────────────────────────────────────────
+    # ── Mapa mundial ─────────────────────────────────────────────────────────
     with tab2:
-        anio_mapa = st.select_slider("Ano del mapa", options=anios, value=2021, key="mapa_anio")
+        anio_mapa = st.select_slider("Año del mapa", options=anios, value=anio_max, key="mapa_anio")
         df_mapa = df[df["anio"] == anio_mapa]
 
         fig_mapa = px.choropleth(
@@ -217,10 +274,10 @@ def main():
             locations="iso3",
             color="esperanza_vida",
             hover_name="pais",
-            hover_data={"iso3": False, "esperanza_vida": ":.1f", "region": True},
+            hover_data={"iso3": False, "esperanza_vida": ":.1f", "region_es": True},
             color_continuous_scale="RdYlGn",
             range_color=[45, 85],
-            labels={"esperanza_vida": "Esperanza de vida"},
+            labels={"esperanza_vida": "Esperanza de vida", "region_es": "Región"},
             title=f"Esperanza de vida al nacer · {anio_mapa}",
         )
         fig_mapa.update_layout(
@@ -228,112 +285,108 @@ def main():
             margin=dict(l=0, r=0, t=40, b=0),
             paper_bgcolor="rgba(0,0,0,0)",
             geo=dict(showframe=False, showcoastlines=True, bgcolor="rgba(0,0,0,0)"),
-            coloraxis_colorbar=dict(title="Anos"),
+            coloraxis_colorbar=dict(title="Años"),
         )
         st.plotly_chart(fig_mapa, use_container_width=True)
 
-        col_a, col_b, col_c = st.columns(3)
-        col_a.metric("Media global", f"{df_mapa['esperanza_vida'].mean():.1f} anos")
-        col_b.metric("Maximo", f"{df_mapa['esperanza_vida'].max():.1f} anos  ({df_mapa.loc[df_mapa['esperanza_vida'].idxmax(), 'pais']})")
-        col_c.metric("Minimo", f"{df_mapa['esperanza_vida'].min():.1f} anos  ({df_mapa.loc[df_mapa['esperanza_vida'].idxmin(), 'pais']})")
+        maximo = df_mapa.loc[df_mapa["esperanza_vida"].idxmax()]
+        minimo = df_mapa.loc[df_mapa["esperanza_vida"].idxmin()]
+        ca, cb, cc = st.columns(3)
+        ca.metric("Promedio mundial", f"{df_mapa['esperanza_vida'].mean():.1f} años")
+        cb.metric(f"Máximo · {maximo['pais']}", f"{maximo['esperanza_vida']:.1f} años")
+        cc.metric(f"Mínimo · {minimo['pais']}", f"{minimo['esperanza_vida']:.1f} años")
 
-    # ── TAB 3: Comparativa ───────────────────────────────────────────────────
+    # ── Comparativa ──────────────────────────────────────────────────────────
     with tab3:
-        regiones_disp = sorted(df["region"].unique())
-        regiones_sel = st.multiselect(
-            "Comparar con regiones",
-            options=regiones_disp,
-            default=["Americas", "Europe"],
+        grupos_sel = st.multiselect(
+            f"Comparar {pais_sel} con",
+            options=list(grupos),
+            default=["LATAM", "OCDE"],
         )
 
-        # Serie de Chile
-        chile = df[df["pais"] == "Chile"].groupby("anio")["esperanza_vida"].mean().reset_index()
-        chile["serie"] = "Chile"
-
-        fig_comp = go.Figure()
-        fig_comp.add_trace(go.Scatter(
-            x=chile["anio"], y=chile["esperanza_vida"],
-            mode="lines+markers", name="Chile",
-            line=dict(color="#f6bd16", width=3),
-            marker=dict(size=6),
+        serie_pais = df[df["pais"] == pais_sel].sort_values("anio")
+        fig_comp = go.Figure(go.Scatter(
+            x=serie_pais["anio"], y=serie_pais["esperanza_vida"],
+            mode="lines+markers", name=pais_sel,
+            line=dict(color=AMARILLO, width=3), marker=dict(size=6),
         ))
-
-        for region in regiones_sel:
-            media_reg = df[df["region"] == region].groupby("anio")["esperanza_vida"].mean().reset_index()
+        paleta = px.colors.qualitative.Set2
+        for i, grupo in enumerate(grupos_sel):
+            media = df[grupos[grupo]].groupby("anio")["esperanza_vida"].mean()
             fig_comp.add_trace(go.Scatter(
-                x=media_reg["anio"], y=media_reg["esperanza_vida"],
-                mode="lines", name=f"{region} (media)",
-                line=dict(color=REGION_COLORS.get(region, "#aaa"), width=2, dash="dot"),
+                x=media.index, y=media.values, mode="lines", name=f"{grupo} (promedio)",
+                line=dict(color=paleta[i % len(paleta)], width=2, dash="dot"),
             ))
-
         fig_comp.update_layout(
-            title="Evolucion de la esperanza de vida · Chile vs. regiones (2000-2021)",
-            xaxis_title="Ano",
-            yaxis_title="Esperanza de vida (anos)",
-            height=440,
+            title=f"Esperanza de vida · {pais_sel} vs. grupos ({anio_min}–{anio_max})",
+            xaxis_title="Año",
+            yaxis_title="Esperanza de vida (años)",
             hovermode="x unified",
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            legend=LEYENDA_ABAJO,
         )
-        fig_comp.update_xaxes(showgrid=True, gridcolor="rgba(128,128,128,0.2)")
-        fig_comp.update_yaxes(showgrid=True, gridcolor="rgba(128,128,128,0.2)")
+        layout_base(fig_comp, 480).update_layout(margin=dict(b=110))
         st.plotly_chart(fig_comp, use_container_width=True)
+        st.caption("Los promedios de cada grupo son promedios simples entre países (sin ponderar por población).")
 
-        # Tabla comparativa ultimo anio disponible
-        ultimo = df["anio"].max()
-        st.subheader(f"Comparativa de indicadores clave · {ultimo}")
-        cols_tabla = ["pais", "region", "esperanza_vida", "mortalidad_infantil",
-                      "pib_per_capita", "acceso_electricidad", "acceso_saneamiento"]
-        df_tabla = df[(df["anio"] == ultimo) & (
-            (df["pais"] == "Chile") | (df["region"].isin(regiones_sel))
-        )][cols_tabla].sort_values("esperanza_vida", ascending=False)
-        st.dataframe(df_tabla.set_index("pais").style.format({
-            "esperanza_vida": "{:.1f}",
-            "mortalidad_infantil": "{:.1f}",
-            "pib_per_capita": "{:,.0f}",
-            "acceso_electricidad": "{:.1f}",
-            "acceso_saneamiento": "{:.1f}",
-        }), use_container_width=True)
+        df_ult = df[df["anio"] == anio_max]
+        columnas = {pais_sel: df_ult[df_ult["pais"] == pais_sel]}
+        for grupo in grupos_sel:
+            columnas[f"{grupo} (promedio)"] = df_ult[grupos[grupo].loc[df_ult.index]]
+        tabla_comp = pd.DataFrame(
+            {
+                nombre: [fmt.format(datos[col].mean()) for col, (_, fmt) in INDICADORES.items()]
+                for nombre, datos in columnas.items()
+            },
+            index=[etiqueta_ind for etiqueta_ind, _ in INDICADORES.values()],
+        )
 
-    # ── TAB 4: Metricas del Modelo ───────────────────────────────────────────
+        st.subheader(f"Indicadores clave · {anio_max}")
+        st.dataframe(tabla_comp, use_container_width=True)
+
+    # ── Métricas del modelo ──────────────────────────────────────────────────
     with tab4:
-        st.subheader("Rendimiento del modelo · Split temporal (train<=2017 / test>=2018)")
+        st.subheader(f"Rendimiento fuera de muestra · entrenado {anio_min}–{train_max_year}, evaluado {train_max_year + 1}–{anio_max}")
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("R²", f"{MODEL_METRICS['R²']:.4f}", help="Coeficiente de determinacion")
-        c2.metric("RMSE", f"{MODEL_METRICS['RMSE']:.3f} anos", help="Raiz del error cuadratico medio")
-        c3.metric("MAE", f"{MODEL_METRICS['MAE']:.3f} anos", help="Error absoluto medio")
-
-        st.caption("El split temporal es la evaluacion mas rigurosa: entrena en datos historicos y predice anos futuros.")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("R²", f"{metricas['r2']:.4f}", help="Proporción de la varianza explicada por el modelo")
+        m2.metric("RMSE", f"{metricas['rmse']:.3f} años", help="Raíz del error cuadrático medio")
+        m3.metric("MAE", f"{metricas['mae']:.3f} años", help="Error absoluto medio")
+        st.caption(
+            "El split temporal es la evaluación más exigente: el modelo predice años que nunca vio, "
+            "como ocurriría en un uso real."
+        )
 
         st.divider()
 
-        # Feature importance global del modelo
-        st.subheader("Importancia de features (XGBoost gain)")
-        importances = model.feature_importances_
-        fi_df = pd.DataFrame({
-            "feature": feature_names,
-            "importance": importances,
-        }).sort_values("importance", ascending=True).tail(15)
+        X_all = preparar_X(df, feature_names)
+        imp = importancia_shap(explainer, X_all).sort_values().tail(12)
+        fig_imp = go.Figure(go.Bar(
+            x=imp.values, y=[etiqueta(f) for f in imp.index],
+            orientation="h", marker_color=AZUL,
+            hovertemplate="%{y}: %{x:.2f} años<extra></extra>",
+        ))
+        fig_imp.update_layout(title="Importancia global de cada variable (promedio de |SHAP|)",
+                              xaxis_title="Impacto promedio en la predicción (años)")
+        st.plotly_chart(layout_base(fig_imp, 440), use_container_width=True)
 
-        fig_fi = px.bar(
-            fi_df, x="importance", y="feature",
-            orientation="h",
-            color="importance",
-            color_continuous_scale="Blues",
-            labels={"importance": "Importancia (gain)", "feature": ""},
-            title="Top 15 features por importancia",
+        test = df[df["anio"] > train_max_year].copy()
+        test["prediccion"] = model.predict(preparar_X(test, feature_names))
+        fig_pr = px.scatter(
+            test, x="esperanza_vida", y="prediccion", color="region_es",
+            color_discrete_map=COLORES_REGION,
+            hover_name="pais", hover_data={"anio": True, "region_es": False},
+            labels={"esperanza_vida": "Valor real (años)", "prediccion": "Predicción (años)",
+                    "region_es": "Región", "anio": "Año"},
+            title=f"Predicción vs. valor real · {train_max_year + 1}–{anio_max}",
+            opacity=0.7,
         )
-        fig_fi.update_layout(
-            height=460,
-            showlegend=False,
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            coloraxis_showscale=False,
-        )
-        fig_fi.update_xaxes(showgrid=True, gridcolor="rgba(128,128,128,0.2)")
-        st.plotly_chart(fig_fi, use_container_width=True)
+        lim = [test[["esperanza_vida", "prediccion"]].min().min() - 1,
+               test[["esperanza_vida", "prediccion"]].max().max() + 1]
+        fig_pr.add_trace(go.Scatter(x=lim, y=lim, mode="lines", name="Predicción perfecta",
+                                    line=dict(color="gray", dash="dash")))
+        fig_pr.update_layout(legend=LEYENDA_ABAJO)
+        layout_base(fig_pr, 540).update_layout(margin=dict(b=110))
+        st.plotly_chart(fig_pr, use_container_width=True)
 
 
 if __name__ == "__main__":
