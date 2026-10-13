@@ -15,6 +15,9 @@ RAW_DIR = Path(__file__).parent.parent / "data" / "raw"
 PROCESSED_DIR = Path(__file__).parent.parent / "data" / "processed"
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
+# La OMS no publica mortalidad adulta (feature principal) despues de 2021
+ANIO_MAX = 2021
+
 REGION_MAP = {
     "Africa": [
         "DZA","AGO","BEN","BWA","BFA","BDI","CPV","CMR","CAF","TCD","COM","COD","COG",
@@ -65,9 +68,13 @@ def validar_iso3(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def imputar_por_grupo(df: pd.DataFrame, col: str) -> pd.Series:
+    # Primero el ultimo valor conocido del mismo pais (solo pasado, para no filtrar
+    # informacion futura al split temporal); luego mediana de region+anio y global.
+    # df debe venir ordenado por iso3 + anio.
+    ultimo_valor_pais = df.groupby("iso3")[col].ffill()
     mediana_grupo = df.groupby(["region", "anio"])[col].transform("median")
     mediana_global = df[col].median()
-    return df[col].fillna(mediana_grupo).fillna(mediana_global)
+    return ultimo_valor_pais.fillna(mediana_grupo).fillna(mediana_global)
 
 
 def limpiar_y_mergear(who: pd.DataFrame, wb: pd.DataFrame) -> pd.DataFrame:
@@ -92,7 +99,11 @@ def limpiar_y_mergear(who: pd.DataFrame, wb: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(subset=["esperanza_vida"])
     print(f"  Sin target eliminadas: {antes - len(df)} filas")
 
-    features = [c for c in df.columns if c not in ["iso3", "anio", "pais", "region", "esperanza_vida"]]
+    antes = len(df)
+    df = df[df["anio"] <= ANIO_MAX].sort_values(["iso3", "anio"]).reset_index(drop=True)
+    print(f"  Anios > {ANIO_MAX} eliminados: {antes - len(df)} filas")
+
+    features =[c for c in df.columns if c not in ["iso3", "anio", "pais", "region", "esperanza_vida"]]
     for col in features:
         if df[col].isna().sum() > 0:
             df[col] = imputar_por_grupo(df, col)
