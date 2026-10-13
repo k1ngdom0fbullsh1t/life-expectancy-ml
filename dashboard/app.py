@@ -40,9 +40,9 @@ OCDE = {
 
 FEATURE_LABELS = {
     "anio":                     "Año",
-    "mortalidad_infantil":      "Mortalidad infantil",
+    "mortalidad_infantil":      "Mortalidad menores de 5",
     "mortalidad_adulta":        "Mortalidad adulta",
-    "prevalencia_vih":          "Personas con VIH (estimado)",
+    "prevalencia_vih":          "Prevalencia de VIH",
     "vacunacion_dtp":           "Vacunación DTP",
     "vacunacion_hepatitis_b":   "Vacunación hepatitis B",
     "medicos_por_10000":        "Médicos por 10.000 hab.",
@@ -60,14 +60,14 @@ FEATURE_LABELS = {
 
 INDICADORES = {
     "esperanza_vida":      ("Esperanza de vida (años)", "{:.1f}"),
-    "mortalidad_infantil": ("Mortalidad infantil (por 1.000)", "{:.1f}"),
+    "mortalidad_infantil": ("Mortalidad menores de 5 (por 1.000)", "{:.1f}"),
     "mortalidad_adulta":   ("Mortalidad adulta (por 1.000)", "{:.1f}"),
     "pib_per_capita":      ("PIB per cápita (USD)", "{:,.0f}"),
     "acceso_electricidad": ("Acceso a electricidad (%)", "{:.1f}"),
     "acceso_saneamiento":  ("Acceso a saneamiento (%)", "{:.1f}"),
     "acceso_agua_potable": ("Acceso a agua potable (%)", "{:.1f}"),
     "gasto_salud_pct_pib": ("Gasto en salud (% PIB)", "{:.1f}"),
-    "prevalencia_vih":     ("Personas con VIH (estimado)", "{:,.0f}"),
+    "prevalencia_vih":     ("Prevalencia de VIH (% 15–49 años)", "{:.2f}"),
 }
 
 AZUL, ROJO, VERDE, AMARILLO = "#5b8ff9", "#e07b54", "#5ad8a6", "#f6bd16"
