@@ -21,12 +21,13 @@ REGION_MAP = {
         "CIV","DJI","EGY","GNQ","ERI","SWZ","ETH","GAB","GMB","GHA","GIN","GNB","KEN",
         "LSO","LBR","LBY","MDG","MWI","MLI","MRT","MUS","MAR","MOZ","NAM","NER","NGA",
         "RWA","STP","SEN","SLE","SOM","ZAF","SSD","SDN","TZA","TGO","TUN","UGA","ZMB","ZWE",
+        "SYC",
     ],
     "Asia": [
         "AFG","ARM","AZE","BHR","BGD","BTN","BRN","KHM","CHN","CYP","GEO","IND","IDN",
         "IRN","IRQ","ISR","JPN","JOR","KAZ","KWT","KGZ","LAO","LBN","MYS","MDV","MNG",
         "MMR","NPL","PRK","OMN","PAK","PSE","PHL","QAT","SAU","SGP","KOR","LKA","SYR",
-        "TWN","TJK","THA","TLS","TKM","ARE","UZB","VNM","YEM",
+        "TWN","TJK","THA","TLS","TKM","ARE","UZB","VNM","YEM","TUR",
     ],
     "Europe": [
         "ALB","AND","AUT","BLR","BEL","BIH","BGR","HRV","CZE","DNK","EST","FIN","FRA",
@@ -37,7 +38,7 @@ REGION_MAP = {
     "Americas": [
         "ATG","ARG","BHS","BRB","BLZ","BOL","BRA","CAN","CHL","COL","CRI","CUB","DMA",
         "DOM","ECU","SLV","GRD","GTM","GUY","HTI","HND","JAM","MEX","NIC","PAN","PRY",
-        "PER","KNA","LCA","VCT","SUR","TTO","USA","URY","VEN",
+        "PER","KNA","LCA","VCT","SUR","TTO","USA","URY","VEN","PRI",
     ],
     "Oceania": [
         "AUS","FJI","KIR","MHL","FSM","NRU","NZL","PLW","PNG","WSM","SLB","TON","TUV","VUT",
