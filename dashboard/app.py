@@ -114,11 +114,17 @@ def load_explainer(_model) -> shap.TreeExplainer:
     return shap.TreeExplainer(_model)
 
 
-def preparar_X(df: pd.DataFrame, feature_names: list) -> pd.DataFrame:
+XGB_DTYPES = {"i": bool, "int": "int64", "float": "float64"}
+
+
+def preparar_X(df: pd.DataFrame, model) -> pd.DataFrame:
+    booster = model.get_booster()
     X = df.copy()
     X["log_pib_per_capita"] = np.log1p(X["pib_per_capita"])
     X = pd.concat([X, pd.get_dummies(X["region"], prefix="region")], axis=1)
-    return X.reindex(columns=feature_names, fill_value=0).astype(float)
+    X = X.reindex(columns=booster.feature_names, fill_value=0)
+    # XGBoost falla en la nube si los tipos no coinciden con los del entrenamiento
+    return X.astype({c: XGB_DTYPES[t] for c, t in zip(booster.feature_names, booster.feature_types)})
 
 
 @st.cache_data
@@ -221,7 +227,7 @@ def main():
             st.warning(f"No hay datos para {pais_sel} en {anio_sel}.")
         else:
             real = float(fila["esperanza_vida"].iloc[0])
-            X_row = preparar_X(fila, feature_names)
+            X_row = preparar_X(fila, model)
             pred = float(model.predict(X_row)[0])
             error = abs(pred - real)
 
@@ -358,7 +364,7 @@ def main():
 
         st.divider()
 
-        X_all = preparar_X(df, feature_names)
+        X_all = preparar_X(df, model)
         imp = importancia_shap(explainer, X_all).sort_values().tail(12)
         fig_imp = go.Figure(go.Bar(
             x=imp.values, y=[etiqueta(f) for f in imp.index],
@@ -370,7 +376,7 @@ def main():
         st.plotly_chart(layout_base(fig_imp, 440), use_container_width=True)
 
         test = df[df["anio"] > train_max_year].copy()
-        test["prediccion"] = model.predict(preparar_X(test, feature_names))
+        test["prediccion"] = model.predict(preparar_X(test, model))
         fig_pr = px.scatter(
             test, x="esperanza_vida", y="prediccion", color="region_es",
             color_discrete_map=COLORES_REGION,
