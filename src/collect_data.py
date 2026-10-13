@@ -6,6 +6,7 @@ Uso:
     python src/collect_data.py
 """
 
+import time
 import requests
 import wbgapi as wb
 import pandas as pd
@@ -26,7 +27,6 @@ WHO_INDICADORES = {
     "WHOSIS_000001": "esperanza_vida",
     "MDG_0000000007": "mortalidad_infantil",
     "WHOSIS_000004": "mortalidad_adulta",
-    "HIV_0000000001": "prevalencia_vih",
     "WHS4_100": "vacunacion_dtp",
     "WHS4_117": "vacunacion_hepatitis_b",
     "HWF_0001": "medicos_por_10000",
@@ -52,9 +52,11 @@ def descargar_who(codigo: str, nombre: str) -> pd.DataFrame:
 
     df = pd.DataFrame(datos)
 
-    # Filtrar por ambos sexos (BTSX) cuando existe la dimension de sexo
+    # Filtrar por ambos sexos cuando existe la dimension de sexo.
+    # La API cambio el codigo de "BTSX" a "SEX_BTSX"; sin filtro se promedian
+    # hombres, mujeres y (en anemia) niveles de severidad.
     if "Dim1" in df.columns:
-        btsx = df[df["Dim1"] == "BTSX"]
+        btsx = df[df["Dim1"].isin(["BTSX", "SEX_BTSX"])]
         if not btsx.empty:
             df = btsx
 
@@ -106,29 +108,43 @@ WB_INDICADORES = {
     "SL.UEM.TOTL.ZS": "tasa_desempleo",
     "SP.URB.TOTL.IN.ZS": "urbanizacion_pct",
     "IT.NET.USER.ZS": "usuarios_internet_pct",
-    "SE.SCH.LIFE": "anios_escolaridad",
+    "SH.DYN.AIDS.ZS": "prevalencia_vih",
 }
+
+
+def descargar_wb(codigo: str, intentos: int = 4) -> list[dict]:
+    # La API del World Bank devuelve 504 de forma intermitente en descargas largas
+    for intento in range(1, intentos + 1):
+        try:
+            return [item for item in wb.data.fetch(codigo, time=ANIOS) if item.get("value") is not None]
+        except wb.APIError as error:
+            if intento == intentos:
+                raise
+            espera = 15 * intento
+            print(f"error {error.code}, reintento en {espera}s...", end=" ")
+            time.sleep(espera)
 
 
 def obtener_world_bank() -> pd.DataFrame:
     print("\n[World Bank] Descargando indicadores...")
-    codigos = list(WB_INDICADORES.keys())
-
-    print(f"  Indicadores: {len(codigos)} | Anios: 2000-2022...", end=" ")
 
     registros = []
-    for item in wb.data.fetch(codigos, time=range(2000, 2023)):
-        if item.get("value") is not None:
-            anio_raw = str(item["time"]).replace("YR", "")
-            registros.append({
+    for codigo, nombre in WB_INDICADORES.items():
+        print(f"  WB  -> {nombre} ({codigo})...", end=" ")
+        items = descargar_wb(codigo)
+        registros += [
+            {
                 "iso3": item["economy"],
-                "anio": int(anio_raw),
+                "anio": int(str(item["time"]).replace("YR", "")),
                 "serie": item["series"],
                 "valor": item["value"],
-            })
+            }
+            for item in items
+        ]
+        print(f"{len(items)} registros")
 
     df_long = pd.DataFrame(registros)
-    print(f"{len(df_long)} registros en formato largo")
+    print(f"  Total: {len(df_long)} registros en formato largo")
 
     df_wide = df_long.pivot_table(
         index=["iso3", "anio"],
