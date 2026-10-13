@@ -1,6 +1,10 @@
 """
-Entrena el modelo final XGBoost con los hiperparametros optimos,
-evalua en test set y guarda el modelo en models/best_model.pkl
+Entrena el modelo XGBoost con los hiperparametros optimos (GridSearchCV del notebook 03).
+
+Genera:
+    models/dashboard_model.pkl -> modelo entrenado con split temporal (train <= 2017),
+                                  usado por el dashboard para que 2018-2021 sean
+                                  predicciones fuera de muestra reales.
 
 Uso:
     python src/train_model.py
@@ -19,11 +23,12 @@ MODELS_DIR    = Path(__file__).parent.parent / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 RANDOM_STATE = 42
+TRAIN_MAX_YEAR = 2017
 
 BEST_PARAMS = {
     "n_estimators":  200,
     "max_depth":     6,
-    "learning_rate": 0.05,
+    "learning_rate": 0.1,
     "subsample":     0.8,
     "random_state":  RANDOM_STATE,
     "n_jobs":        -1,
@@ -48,8 +53,8 @@ def evaluar(nombre: str, y_true, y_pred) -> dict:
     rmse = mean_squared_error(y_true, y_pred) ** 0.5
     mae  = mean_absolute_error(y_true, y_pred)
     r2   = r2_score(y_true, y_pred)
-    print(f"  {nombre:<20} RMSE={rmse:.3f}  MAE={mae:.3f}  R2={r2:.4f}")
-    return {"modelo": nombre, "rmse": rmse, "mae": mae, "r2": r2}
+    print(f"  {nombre:<28} RMSE={rmse:.3f}  MAE={mae:.3f}  R2={r2:.4f}")
+    return {"rmse": round(rmse, 3), "mae": round(mae, 3), "r2": round(r2, 4)}
 
 
 if __name__ == "__main__":
@@ -59,21 +64,22 @@ if __name__ == "__main__":
 
     df = pd.read_csv(PROCESSED_DIR / "dataset_final.csv")
     X, y = preparar_features(df)
+    print(f"\nFeatures: {X.shape[1]}")
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=RANDOM_STATE
-    )
-    print(f"\nTrain: {len(X_train)} muestras | Test: {len(X_test)} muestras")
-    print(f"Features: {X_train.shape[1]}")
+    print("\nEvaluacion:")
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=RANDOM_STATE)
+    evaluar("Split aleatorio 80/20", y_te, XGBRegressor(**BEST_PARAMS).fit(X_tr, y_tr).predict(X_te))
 
-    print("\nEntrenando modelo XGBoost con parametros optimos...")
-    model = XGBRegressor(**BEST_PARAMS)
-    model.fit(X_train, y_train)
+    es_train = X["anio"] <= TRAIN_MAX_YEAR
+    model = XGBRegressor(**BEST_PARAMS).fit(X[es_train], y[es_train])
+    metricas = evaluar(f"Split temporal (<= {TRAIN_MAX_YEAR})", y[~es_train], model.predict(X[~es_train]))
 
-    print("\nEvaluacion en test set:")
-    evaluar("XGBoost", y_test, model.predict(X_test))
-
-    salida = MODELS_DIR / "best_model.pkl"
-    joblib.dump({"model": model, "feature_names": list(X_train.columns)}, salida)
+    salida = MODELS_DIR / "dashboard_model.pkl"
+    joblib.dump({
+        "model":          model,
+        "feature_names":  list(X.columns),
+        "train_max_year": TRAIN_MAX_YEAR,
+        "metrics":        metricas,
+    }, salida)
     print(f"\nModelo guardado en: {salida}")
     print("Listo.")
