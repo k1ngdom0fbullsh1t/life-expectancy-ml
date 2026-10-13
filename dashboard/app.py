@@ -97,21 +97,23 @@ def layout_base(fig: go.Figure, height: int) -> go.Figure:
 
 # ── Carga ─────────────────────────────────────────────────────────────────────
 
+# La fecha de modificacion va en la clave de cache: Streamlit Cloud recarga el codigo sin
+# reiniciar el proceso, y sin ella se reutilizan datos o modelos de una version anterior.
+def version(path: Path) -> float:
+    return path.stat().st_mtime
+
+
 @st.cache_data
-def load_data() -> pd.DataFrame:
+def load_data(data_version: float) -> pd.DataFrame:
     df = pd.read_csv(DATA_PATH)
     df["region_es"] = df["region"].map(REGION_ES)
     return df
 
 
 @st.cache_resource
-def load_artifact() -> dict:
-    return joblib.load(MODEL_PATH)
-
-
-@st.cache_resource
-def load_explainer(_model) -> shap.TreeExplainer:
-    return shap.TreeExplainer(_model)
+def load_model(model_version: float) -> tuple[dict, shap.TreeExplainer]:
+    artifact = joblib.load(MODEL_PATH)
+    return artifact, shap.TreeExplainer(artifact["model"])
 
 
 XGB_DTYPES = {"i": bool, "int": "int64", "float": "float64"}
@@ -123,12 +125,11 @@ def preparar_X(df: pd.DataFrame, model) -> pd.DataFrame:
     X["log_pib_per_capita"] = np.log1p(X["pib_per_capita"])
     X = pd.concat([X, pd.get_dummies(X["region"], prefix="region")], axis=1)
     X = X.reindex(columns=booster.feature_names, fill_value=0)
-    # XGBoost falla en la nube si los tipos no coinciden con los del entrenamiento
     return X.astype({c: XGB_DTYPES[t] for c, t in zip(booster.feature_names, booster.feature_types)})
 
 
 @st.cache_data
-def importancia_shap(_explainer, X: pd.DataFrame) -> pd.Series:
+def importancia_shap(_explainer, X: pd.DataFrame, model_version: float) -> pd.Series:
     valores = _explainer(X).values
     return pd.Series(np.abs(valores).mean(axis=0), index=X.columns)
 
@@ -183,13 +184,12 @@ def shap_waterfall(shap_vals, feature_names, base_value, prediction, top_n=8) ->
 # ── App ───────────────────────────────────────────────────────────────────────
 
 def main():
-    df = load_data()
-    artifact = load_artifact()
+    df = load_data(version(DATA_PATH))
+    artifact, explainer = load_model(version(MODEL_PATH))
     model = artifact["model"]
     feature_names = artifact["feature_names"]
     train_max_year = artifact["train_max_year"]
     metricas = artifact["metrics"]
-    explainer = load_explainer(model)
     grupos = grupos_comparacion(df)
 
     paises = sorted(df["pais"].unique())
@@ -365,7 +365,7 @@ def main():
         st.divider()
 
         X_all = preparar_X(df, model)
-        imp = importancia_shap(explainer, X_all).sort_values().tail(12)
+        imp = importancia_shap(explainer, X_all, version(MODEL_PATH)).sort_values().tail(12)
         fig_imp = go.Figure(go.Bar(
             x=imp.values, y=[etiqueta(f) for f in imp.index],
             orientation="h", marker_color=AZUL,
