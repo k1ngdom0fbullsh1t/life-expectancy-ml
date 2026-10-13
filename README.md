@@ -16,14 +16,14 @@ Machine learning model that predicts **life expectancy at birth** for 185 countr
 
 | Evaluation | R² | RMSE | MAE |
 |---|---|---|---|
-| **Temporal split** (train 2000–2017, test 2018–2021) | **0.9858** | **0.861 years** | **0.625 years** |
-| Random split 80/20 | 0.9976 | 0.416 years | 0.297 years |
+| **Temporal split** (train 2000–2017, test 2018–2021) | **0.9822** | **0.974 years** | **0.645 years** |
+| Random split 80/20 | 0.9970 | 0.458 years | 0.308 years |
 
-The temporal split is the reference metric: the model predicts years it has never seen, which is how it would be used in practice. The random split is shown for comparison only; it is optimistic because the same country appears in both train and test in neighboring years.
+The temporal split is the reference metric: the model predicts years it has never seen, which is how it would be used in practice. The random split is shown for comparison only; it is optimistic because the same country appears in both train and test in neighboring years. Most of the out-of-sample error comes from 2020–2021, when COVID-19 caused sudden drops that the indicators do not capture.
 
-**Most influential features (mean |SHAP|):** adult mortality, infant mortality, child anemia prevalence and GDP per capita (log).
+**Most influential features (mean |SHAP|):** adult mortality, under-five mortality, child anemia prevalence and GDP per capita (log).
 
-**Chile:** consistently above the Latin America average and at OECD level (79.0 vs. 72.5 LATAM and 79.7 OECD in 2021). The 2020–2021 drop matches the impact of COVID-19.
+**Chile:** consistently above the Latin America average and at OECD level (79.3 vs. 72.0 LATAM and 79.7 OECD in 2021). The 2020–2021 drop matches the impact of COVID-19.
 
 ## Dashboard
 
@@ -40,10 +40,10 @@ The temporal split is the reference metric: the model predicts years it has neve
 
 | Source | Indicators |
 |---|---|
-| WHO Global Health Observatory API | Life expectancy (target), infant and adult mortality, people living with HIV, DTP and hepatitis B vaccination, physicians per 10,000, child anemia |
-| World Bank API (`wbgapi`) | GDP per capita, health and education spending (% GDP), access to drinking water, sanitation and electricity, unemployment, urbanization, internet users |
+| WHO Global Health Observatory API | Life expectancy (target), under-five and adult mortality, DTP and hepatitis B vaccination, physicians per 10,000, child anemia |
+| World Bank API (`wbgapi`) | GDP per capita, health and education spending (% GDP), access to drinking water, sanitation and electricity, unemployment, urbanization, internet users, HIV prevalence (% ages 15–49) |
 
-Final dataset: **4,070 rows · 185 countries · 2000–2021**. Countries are merged by ISO-3 code and year; missing values are imputed with the median of their UN region and year.
+Final dataset: **4,070 rows · 185 countries · 2000–2021**. WHO values are filtered to both sexes. Countries are merged by ISO-3 code and year; missing values are filled with the last known value of the same country (past only, so the temporal evaluation stays clean) and then with the median of their UN region and year.
 
 ## Methodology
 
@@ -85,8 +85,9 @@ streamlit run dashboard/app.py
 
 ## Limitations
 
-- The WHO HIV indicator used is the **estimated number of people living with HIV** (an absolute count), not a prevalence rate, so it partly reflects population size.
-- Missing values are imputed with regional medians, which smooths differences between countries with sparse data.
+- The period ends in 2021 because the WHO has not published adult mortality, the most important feature, for later years.
+- The WHO child anemia series ends in 2019, so 2020–2021 reuse each country's 2019 value.
+- About 20% of HIV prevalence values are imputed: 36 countries have no World Bank data, mostly low-prevalence ones.
 - Group averages in the dashboard are simple country averages, not weighted by population.
 
 ## Author
