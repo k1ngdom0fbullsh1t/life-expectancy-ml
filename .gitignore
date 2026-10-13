@@ -5,7 +5,9 @@ env/
 
 # Datos (no subir a GitHub)
 data/raw/
-data/processed/
+data/processed/*
+# Excepcion: dataset final necesario para el dashboard en Streamlit Cloud
+!data/processed/dataset_final.csv
 
 # Jupyter
 .ipynb_checkpoints/
